@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHATTTT</title>
+    <link rel="stylesheet" href="/static/chatcss.css">
+    <!-- Update to Font Awesome 6 for better icon support -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+
+<body>
+    <div class="main-wrapper">
+        <div class="sidebar-menu">
+            <div class="menu-toggle" role="button" aria-label="Toggle menu">
+                <i class="fas fa-bars"></i>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item settings-tab" role="button" aria-label="Settings">
+                    <i class="fas fa-cog"></i>
+                </div>
+                <div class="menu-item" id="groupsTab" role="button" aria-label="Groups">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="menu-item active" id="contactsTab" role="button" aria-label="Contacts">
+                    <i class="fas fa-comments"></i>
+                </div>
+            </div>
+        </div>
+        <div class="container">
+            <div class="sidebar">
+                <div class="search-bar">
+                    <input type="text" placeholder="Поиск..." id="searchInput" aria-label="Search contacts or groups">
+                    <i class="fas fa-search"></i>
+                </div>
+                <div id="searchResults" aria-live="polite"></div>
+                <div class="contacts active" id="contactsList"></div>
+                <div class="groups" id="groupsList"></div>
+            </div>
+            <div class="chat-area">
+                <div class="chat-header">
+                    <div class="avatar"></div>
+                    <div class="user-info">
+                        <span class="name"></span>
+                        <span class="status"></span>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chatMessages" aria-live="polite">
+                    <!-- Add a placeholder for better UX -->
+                    <div class="chat-placeholder" style="text-align: center; color: #888; padding: 20px;">
+                        Выберите контакт или группу для начала чата...
+                    </div>
+                </div>
+                <div class="chat-input">
+                    <button class="emoji-button" aria-label="Open emoji panel">
+                        <i class="fas fa-smile"></i>
+                    </button>
+                    <div class="emoji-panel" id="emojiPanel" role="menu">
+                        <div class="emoji-category">
+                            <span class="emoji-title">Смайлы</span>
+                            <span class="emoji" data-emoji="😊" role="menuitem">😊</span>
+                            <span class="emoji" data-emoji="😂" role="menuitem">😂</span>
+                            <span class="emoji" data-emoji="😍" role="menuitem">😍</span>
+                            <span class="emoji" data-emoji="😎" role="menuitem">😎</span>
+                            <span class="emoji" data-emoji="😜" role="menuitem">😜</span>
+                            <span class="emoji" data-emoji="🤓" role="menuitem">🤓</span>
+                            <span class="emoji" data-emoji="😇" role="menuitem">😇</span>
+                        </div>
+                        <div class="emoji-category">
+                            <span class="emoji-title">Жесты</span>
+                            <span class="emoji" data-emoji="👍" role="menuitem">👍</span>
+                            <span class="emoji" data-emoji="👊" role="menuitem">👊</span>
+                            <span class="emoji" data-emoji="✌️" role="menuitem">✌️</span>
+                        </div>
+                        <div class="emoji-category">
+                            <span class="emoji-title">Объекты</span>
+                            <span class="emoji" data-emoji="🔥" role="menuitem">🔥</span>
+                            <span class="emoji" data-emoji="🚀" role="menuitem">🚀</span>
+                            <span class="emoji" data-emoji="💡" role="menuitem">💡</span>
+                            <span class="emoji" data-emoji="🎉" role="menuitem">🎉</span>
+                            <span class="emoji" data-emoji="📱" role="menuitem">📱</span>
+                            <span class="emoji" data-emoji="💻" role="menuitem">💻</span>
+                            <span class="emoji" data-emoji="📷" role="menuitem">📷</span>
+                            <span class="emoji" data-emoji="🎁" role="menuitem">🎁</span>
+                            <span class="emoji" data-emoji="📚" role="menuitem">📚</span>
+                            <span class="emoji" data-emoji="✈️" role="menuitem">✈️</span>
+                        </div>
+                        <div class="emoji-category">
+                            <span class="emoji-title">Животные</span>
+                            <span class="emoji" data-emoji="🐶" role="menuitem">🐶</span>
+                            <span class="emoji" data-emoji="🐱" role="menuitem">🐱</span>
+                            <span class="emoji" data-emoji="🐰" role="menuitem">🐰</span>
+                            <span class="emoji" data-emoji="🦁" role="menuitem">🦁</span>
+                            <span class="emoji" data-emoji="🐯" role="menuitem">🐯</span>
+                            <span class="emoji" data-emoji="🐻" role="menuitem">🐻</span>
+                            <span class="emoji" data-emoji="🐼" role="menuitem">🐼</span>
+                            <span class="emoji" data-emoji="🐨" role="menuitem">🐨</span>
+                            <span class="emoji" data-emoji="🐵" role="menuitem">🐵</span>
+                            <span class="emoji" data-emoji="🦊" role="menuitem">🦊</span>
+                        </div>
+                    </div>
+                    <input type="text" placeholder="Введите ваше сообщение..." id="messageInput"
+                        aria-label="Message input">
+                    <button id="sendButton" aria-label="Send message">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overlay" id="settingsOverlay"></div>
+            <div class="settings-menu" id="settingsMenu" role="menu">
+                <div class="settings-main active">
+                    <div class="settings-header">
+                        <span>Settings</span>
+                    </div>
+                    <div class="settings-item" data-action="my-profile" role="menuitem">
+                        <i class="fas fa-user settings-icon"></i> My profile
+                    </div>
+                    <div class="settings-item" data-action="create-group" role="menuitem">
+                        <i class="fas fa-users settings-icon"></i> Create Group
+                    </div>
+                    <div class="settings-item" data-action="exit" role="menuitem">
+                        <i class="fas fa-sign-out-alt settings-icon"></i> Exit
+                    </div>
+                </div>
+                <div class="settings-profile">
+                    <div class="settings-header">
+                        <i class="fas fa-arrow-left back-button" role="button" aria-label="Back to settings"></i>
+                        <span>My profile</span>
+                    </div>
+                    <div class="profile-info">
+                        <div class="profile-avatar"></div>
+                        <div class="profile-details">
+                            <div class="profile-name-container">
+                                <i class="fas fa-user profile-icon"></i>
+                                <span class="profile-name">User</span>
+                            </div>
+                            <div class="profile-email-container">
+                                <i class="fas fa-envelope profile-icon"></i>
+                                <span class="profile-email">Email не указан</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-item info-button" role="button">information</div>
+                </div>
+            </div>
+            <div class="modal" id="groupModal" role="dialog" aria-labelledby="groupModalTitle">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <span id="groupModalTitle">Создать группу</span>
+                        <i class="fas fa-times modal-close" role="button" aria-label="Close modal"></i>
+                    </div>
+                    <div class="modal-body">
+                        <label for="groupNameInput">Название группы:</label>
+                        <input type="text" id="groupNameInput" placeholder="Введите название" aria-label="Group name">
+                        <label>Участники:</label>
+                        <div class="contacts-list" id="groupContactsList" aria-label="Select group members"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button id="createGroupFinal" aria-label="Create group">Создать</button>
+                        <button class="modal-close" aria-label="Cancel">Отмена</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/chatjs.js"></script>
+</body>
+
+</html>
