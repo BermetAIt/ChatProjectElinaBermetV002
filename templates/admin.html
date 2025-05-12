@@ -150,7 +150,8 @@
         .chart-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 20px;
+            gap: 30px;
+            margin-bottom: 30px;
         }
         
         .chart-card {
@@ -158,6 +159,9 @@
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            height: 350px;
+            display: flex;
+            flex-direction: column;
         }
         
         .chart-card h3 {
@@ -165,6 +169,14 @@
             margin-top: 0;
             border-bottom: 1px solid #eee;
             padding-bottom: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .chart-area {
+            flex-grow: 1;
+            position: relative;
+            margin-bottom: 30px;
         }
         
         .btn {
@@ -264,6 +276,11 @@
             background-color: #f5f5f5;
             color: #757575;
         }
+        
+        .status.new {
+            background-color: #fff3cd;
+            color: #856404;
+        }
     </style>
 </head>
 <body>
@@ -302,8 +319,13 @@
                     <p>Total Messages</p>
                 </div>
                 <div class="stat-card">
-                    <i class="fas fa-user-plus"></i>
+                    <i class="fas fa-user-clock"></i>
                     <h3 id="new-users">0</h3>
+                    <p>Active Users (24h)</p>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-user-plus"></i>
+                    <h3 id="recent-users">0</h3>
                     <p>New Users (Today)</p>
                 </div>
                 <div class="stat-card">
@@ -316,11 +338,15 @@
             <div class="chart-container">
                 <div class="chart-card">
                     <h3>User Statistics</h3>
-                    <canvas id="userChart"></canvas>
+                    <div class="chart-area">
+                        <canvas id="userChart"></canvas>
+                    </div>
                 </div>
                 <div class="chart-card">
                     <h3>Activity Overview</h3>
-                    <canvas id="activityChart"></canvas>
+                    <div class="chart-area">
+                        <canvas id="activityChart"></canvas>
+                    </div>
                 </div>
             </div>
             
@@ -350,103 +376,205 @@
     </div>
 
     <script>
+        // Initialize chart variables globally
+        window.userChart = null;
+        window.activityChart = null;
+        
+        // Set up auto refresh interval
+        let autoRefreshInterval = null;
+        const REFRESH_INTERVAL = 30000; // 30 seconds
+        
         // Загрузка данных при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('Инициализация админской панели');
+            
+            // Устанавливаем обработчик ошибок
+            window.onerror = function(message, source, lineno, colno, error) {
+                console.error('Глобальная ошибка:', message, 'в', source, 'строка:', lineno, 'колонка:', colno, 'объект ошибки:', error);
+                showErrorMessage('Произошла ошибка JavaScript: ' + message, () => location.reload());
+                return true; // Предотвращаем стандартную обработку ошибки
+            };
+            
+            // Попытка загрузки данных
             loadStatistics();
+            
+            // Запускаем автоматическое обновление данных
+            startAutoRefresh();
+            
+            // Автоматический повтор при ошибке через 3 секунды
+            setTimeout(function() {
+                const errorContainer = document.getElementById('error-container');
+                if (errorContainer) {
+                    // Есть ошибка, пробуем еще раз
+                    console.log('Автоматическая повторная попытка загрузки данных...');
+                    loadStatistics();
+                }
+            }, 3000);
         });
         
-        // Загрузка статистики
-        async function loadStatistics() {
-            try {
-                // Получение списка пользователей
-                const response = await fetch('/api/users', {
-                    credentials: 'include'
-                });
-                const data = await response.json();
-                
-                if (response.ok) {
-                    // Обновление количества пользователей
-                    const totalUsers = data.users.length;
-                    document.getElementById('total-users').textContent = totalUsers;
-                    document.getElementById('total-admins').textContent = '1'; // Предполагаем, что только один админ
-                    
-                    // Симуляция других данных (в реальном приложении эти данные должны приходить с сервера)
-                    document.getElementById('total-messages').textContent = Math.floor(Math.random() * 1000);
-                    document.getElementById('new-users').textContent = Math.floor(Math.random() * 10);
-                    
-                    // Создание круговых диаграмм с данными
-                    createUserChart(totalUsers);
-                    createActivityChart();
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            } catch (error) {
-                console.error('Error loading statistics:', error);
-                alert('Error loading data. Please try again.');
+        // Функция для запуска автоматического обновления
+        function startAutoRefresh() {
+            // Очищаем существующий интервал, если есть
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            // Устанавливаем новый интервал обновления
+            autoRefreshInterval = setInterval(function() {
+                console.log('Автоматическое обновление данных...');
+                updateMessageStats();
+            }, REFRESH_INTERVAL);
+            
+            console.log('Автоматическое обновление запущено, интервал:', REFRESH_INTERVAL, 'мс');
+        }
+        
+        // Функция для остановки автоматического обновления
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                console.log('Автоматическое обновление остановлено');
             }
         }
         
-        // Создание круговой диаграммы пользователей
-        function createUserChart(totalUsers) {
-            const ctx = document.getElementById('userChart').getContext('2d');
-            
-            // Демо-данные (в реальном приложении данные должны приходить с сервера)
-            const activeUsers = Math.floor(totalUsers * 0.7);
-            const inactiveUsers = totalUsers - activeUsers;
-            
-            new Chart(ctx, {
-                type: 'pie',
-                data: {
-                    labels: ['Active Users', 'Inactive Users'],
-                    datasets: [{
-                        data: [activeUsers, inactiveUsers],
-                        backgroundColor: ['#5995fd', '#f0f0f0'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
+        // Функция для обновления только статистики сообщений и активных пользователей
+        async function updateMessageStats() {
+            try {
+                // Используем полный URL, основанный на текущем хосте
+                const apiUrl = window.location.origin + '/api/messages/stats';
+                console.log('Запрос обновления статистики к:', apiUrl);
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        console.error('Ошибка авторизации при обновлении статистики');
+                        return;
+                    }
+                    throw new Error(`Ошибка сервера: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Получены данные статистики:', data);
+                
+                // Обновляем счетчик сообщений
+                if (data.total_messages !== undefined) {
+                    document.getElementById('total-messages').textContent = data.total_messages;
+                }
+                
+                // Обновляем счетчик активных пользователей
+                if (data.active_users !== undefined) {
+                    document.getElementById('new-users').textContent = data.active_users;
+                }
+                
+                // Обновляем счетчик новых пользователей
+                if (data.new_users !== undefined) {
+                    document.getElementById('recent-users').textContent = data.new_users;
+                }
+                
+                // Обновляем таблицу пользователей для отображения новых статусов
+                // но только если прошло достаточно времени с последнего полного обновления
+                const lastFullUpdate = window.lastFullUpdate || 0;
+                const now = Date.now();
+                if (!window.lastFullUpdate || now - lastFullUpdate > 60000) { // Раз в минуту
+                    console.log('Обновляем полную информацию о пользователях');
+                    
+                    try {
+                        const usersResponse = await fetch(window.location.origin + '/api/users/details', {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        });
+                        
+                        if (usersResponse.ok) {
+                            const usersData = await usersResponse.json();
+                            updateUserTable(usersData.users);
+                            window.lastFullUpdate = now;
                         }
+                    } catch (userError) {
+                        console.error('Ошибка при обновлении данных о пользователях:', userError);
                     }
                 }
+                
+                // Обновляем график активности, если он уже создан
+                const totalUsers = parseInt(document.getElementById('total-users').textContent);
+                try {
+                    if (window.activityChart instanceof Chart) {
+                        createActivityChart(
+                            data.total_messages || 0, 
+                            data.active_users * 3 || 0, 
+                            data.active_users || 0,
+                            data.new_users || 0
+                        );
+                    }
+                } catch (chartError) {
+                    console.error('Ошибка при обновлении графика активности:', chartError);
+                }
+                
+                console.log('Статистика успешно обновлена');
+            } catch (error) {
+                console.error('Ошибка при обновлении статистики:', error);
+                // Не показываем ошибку пользователю, чтобы не прерывать работу
+            }
+        }
+        
+        // Функция для обновления таблицы пользователей
+        function updateUserTable(users) {
+            if (!users || !Array.isArray(users)) return;
+            
+            const tableBody = document.getElementById('users-table-body');
+            if (!tableBody) return;
+            
+            tableBody.innerHTML = '';
+            
+            users.forEach((user, index) => {
+                const row = document.createElement('tr');
+                
+                // Добавляем индикатор активного статуса
+                let statusClass = user.is_active ? 'active' : 'inactive';
+                let statusText = user.is_admin ? 'Admin' : (user.is_active ? 'Active' : 'Inactive');
+                
+                // Если пользователь новый, указываем это в статусе
+                if (user.is_new) {
+                    statusClass = 'new';
+                    statusText = 'New';
+                } else if (user.is_admin) {
+                    statusClass = 'active';
+                    statusText = 'Admin';
+                }
+                
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${user.username}</td>
+                    <td>${user.email}</td>
+                    <td><span class="status ${statusClass}">${statusText}</span></td>
+                `;
+                tableBody.appendChild(row);
             });
         }
         
-        // Создание круговой диаграммы активности
-        function createActivityChart() {
-            const ctx = document.getElementById('activityChart').getContext('2d');
-            
-            // Демо-данные (в реальном приложении данные должны приходить с сервера)
-            new Chart(ctx, {
-                type: 'pie',
-                data: {
-                    labels: ['Messages', 'Logins', 'Registrations'],
-                    datasets: [{
-                        data: [65, 20, 15],
-                        backgroundColor: ['#5995fd', '#fd6359', '#59fd7d'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
+        // Загрузка статистики
+        function loadStatistics() {
+            try {
+                loadUserDetails();
+            } catch(error) {
+                console.error('Ошибка при загрузке статистики:', error);
+                showErrorMessage('Не удалось загрузить статистику: ' + error.message, () => loadStatistics());
+            }
         }
         
         // Просмотр пользователей
         async function viewUsers() {
             try {
-                const response = await fetch('/api/users', {
+                const response = await fetch(window.location.origin + '/api/users', {
                     credentials: 'include'
                 });
                 const data = await response.json();
@@ -463,14 +591,22 @@
         
         // Обновление данных
         function refreshData() {
-            loadStatistics();
-            alert('Data refreshed!');
+            try {
+                console.log('Обновление данных...');
+                stopAutoRefresh(); // Останавливаем автообновление на время полного обновления
+                loadStatistics();
+                startAutoRefresh(); // Перезапускаем автообновление
+                alert('Data refreshed!');
+            } catch (error) {
+                console.error('Ошибка при обновлении данных:', error);
+                alert('Error refreshing data: ' + error.message);
+            }
         }
         
         // Выход из системы
         async function logout() {
             try {
-                const response = await fetch('/api/logout', {
+                const response = await fetch(window.location.origin + '/api/logout', {
                     method: 'POST',
                     credentials: 'include'
                 });
@@ -485,24 +621,84 @@
         
         // Функция для получения полных данных о пользователях, включая email
         async function loadUserDetails() {
+            // Показываем индикатор загрузки
+            showErrorMessage('Загрузка данных...', null, true);
+            
             try {
-                const response = await fetch('/api/users/details', {
-                    credentials: 'include'
+                // Используем URL, основанный на текущем хосте
+                const apiUrl = window.location.origin + '/api/users/details';
+                console.log('Отправка запроса к:', apiUrl);
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
                 });
+                
+                console.log('Получен ответ с кодом:', response.status);
+                
+                if (response.status === 401) {
+                    // Пользователь не авторизован или не является администратором
+                    console.error('Ошибка авторизации: не админ или истекла сессия');
+                    window.location.href = '/'; // Перенаправляем на страницу входа
+                    return;
+                }
+                
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error(`Получен неверный тип контента: ${contentType}`);
+                }
+                
                 const data = await response.json();
+                console.log('Получены данные:', data);
                 
                 if (response.ok) {
+                    // Удаляем сообщение загрузки или ошибки
+                    const errorContainer = document.getElementById('error-container');
+                    if (errorContainer) {
+                        errorContainer.remove();
+                    }
+                    
+                    // Показываем обычный контент
+                    const statsContainer = document.querySelector('.stats-container');
+                    const chartContainer = document.querySelector('.chart-container');
+                    const tableContainer = document.querySelector('.users-table-container');
+                    
+                    if (statsContainer) statsContainer.style.display = 'grid';
+                    if (chartContainer) chartContainer.style.display = 'grid';
+                    if (tableContainer) tableContainer.style.display = 'block';
+                    
                     // Заполняем таблицу пользователей
                     const tableBody = document.getElementById('users-table-body');
                     tableBody.innerHTML = '';
                     
+                    if (!data.users || !Array.isArray(data.users)) {
+                        throw new Error('Данные пользователей отсутствуют или неверный формат');
+                    }
+                    
                     data.users.forEach((user, index) => {
                         const row = document.createElement('tr');
+                        
+                        // Добавляем индикатор активного статуса
+                        let statusClass = user.is_active ? 'active' : 'inactive';
+                        let statusText = user.is_admin ? 'Admin' : (user.is_active ? 'Active' : 'Inactive');
+                        
+                        // Если пользователь новый, указываем это в статусе
+                        if (user.is_new) {
+                            statusClass = 'new';
+                            statusText = 'New';
+                        } else if (user.is_admin) {
+                            statusClass = 'active';
+                            statusText = 'Admin';
+                        }
+                        
                         row.innerHTML = `
                             <td>${index + 1}</td>
                             <td>${user.username}</td>
                             <td>${user.email}</td>
-                            <td><span class="status ${user.is_admin ? 'active' : 'inactive'}">${user.is_admin ? 'Admin' : 'User'}</span></td>
+                            <td><span class="status ${statusClass}">${statusText}</span></td>
                         `;
                         tableBody.appendChild(row);
                     });
@@ -514,16 +710,202 @@
                     const admins = data.users.filter(user => user.is_admin).length;
                     document.getElementById('total-admins').textContent = admins;
                     
-                    // Создаем круговые диаграммы с данными
-                    createUserChart(totalUsers);
-                    createActivityChart();
+                    // Получаем количество активных пользователей
+                    const activeUsers = data.users.filter(user => user.is_active && !user.is_admin).length;
+                    document.getElementById('new-users').textContent = activeUsers;
                     
+                    // Проверяем время создания для новых пользователей
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0); // Начало текущего дня
+                    
+                    // В полной версии используем поле created_at
+                    // В упрощенной версии используем last_activity как приближение
+                    const newUsersToday = data.users.filter(user => {
+                        if (user.is_admin) return false;
+                        if (!user.last_activity) return false;
+                        
+                        const activityDate = new Date(user.last_activity);
+                        // Проверяем, есть ли поле created_at
+                        if (user.created_at) {
+                            const createdDate = new Date(user.created_at);
+                            return createdDate >= today;
+                        } else {
+                            return activityDate >= today;
+                        }
+                    }).length;
+                    
+                    document.getElementById('recent-users').textContent = newUsersToday;
+                    
+                    // Переименовываем метку, чтобы показать, что это активные пользователи
+                    const newUsersLabel = document.querySelector('.stat-card:nth-child(3) p');
+                    if (newUsersLabel) {
+                        newUsersLabel.textContent = 'Active Users (24h)';
+                    }
+                    
+                    // Обновляем иконку для активных пользователей
+                    const newUsersIcon = document.querySelector('.stat-card:nth-child(3) i');
+                    if (newUsersIcon) {
+                        newUsersIcon.className = 'fas fa-user-clock';
+                    }
+                    
+                    // Пробуем получить статистику сообщений
+                    try {
+                        fetch(window.location.origin + '/api/messages/stats', {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Ошибка получения статистики сообщений');
+                            }
+                            return response.json();
+                        })
+                        .then(statsData => {
+                            console.log('Получены данные статистики сообщений:', statsData);
+                            
+                            // Обновляем счетчик сообщений
+                            if (statsData.total_messages !== undefined) {
+                                document.getElementById('total-messages').textContent = statsData.total_messages;
+                            } else {
+                                // Если нет данных, используем приблизительную оценку
+                                const regularUsers = totalUsers - admins;
+                                document.getElementById('total-messages').textContent = regularUsers * 5;
+                            }
+                            
+                            // Обновляем счетчик активных пользователей, если он доступен из API
+                            if (statsData.active_users !== undefined) {
+                                document.getElementById('new-users').textContent = statsData.active_users;
+                            }
+                            
+                            // Обновляем счетчик новых пользователей, если он доступен из API
+                            if (statsData.new_users !== undefined) {
+                                document.getElementById('recent-users').textContent = statsData.new_users;
+                            }
+                            
+                            // Создаем круговые диаграммы с данными
+                            const regularUsers = totalUsers - admins;
+                            
+                            try {
+                                // Создаем диаграмму пользователей
+                                createUserChart(totalUsers, regularUsers - activeUsers, activeUsers, admins);
+                                
+                                // Создаем диаграмму активности
+                                createActivityChart(
+                                    statsData.total_messages || regularUsers * 5,  // Общее количество сообщений
+                                    activeUsers * 3,                               // Примерное количество логинов
+                                    activeUsers,                                   // Активные пользователи
+                                    statsData.new_users || newUsersToday           // Новые пользователи
+                                );
+                            } catch (chartError) {
+                                console.error('Ошибка при создании диаграмм:', chartError);
+                                showErrorMessage('Ошибка при создании диаграмм: ' + chartError.message, () => loadUserDetails());
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Ошибка при получении статистики сообщений:', error);
+                            
+                            // Если не удалось получить статистику, используем приблизительные данные
+                            const regularUsers = totalUsers - admins;
+                            document.getElementById('total-messages').textContent = regularUsers * 5;
+                            
+                            // Создаем круговые диаграммы с приблизительными данными
+                            try {
+                                createUserChart(totalUsers, regularUsers - activeUsers, activeUsers, admins);
+                                createActivityChart(regularUsers * 5, activeUsers * 3, activeUsers, newUsersToday);
+                            } catch (chartError) {
+                                console.error('Ошибка при создании диаграмм:', chartError);
+                                showErrorMessage('Ошибка при создании диаграмм: ' + chartError.message, () => loadUserDetails());
+                            }
+                        });
+                    } catch (statsError) {
+                        console.error('Ошибка при запросе статистики сообщений:', statsError);
+                        
+                        // Используем приблизительные значения для статистики
+                        const regularUsers = totalUsers - admins;
+                        document.getElementById('total-messages').textContent = regularUsers * 5;
+                        
+                        // Создаем круговые диаграммы с приблизительными данными
+                        try {
+                            createUserChart(totalUsers, regularUsers - activeUsers, activeUsers, admins);
+                            createActivityChart(regularUsers * 5, activeUsers * 3, activeUsers, newUsersToday);
+                        } catch (chartError) {
+                            console.error('Ошибка при создании диаграмм:', chartError);
+                            showErrorMessage('Ошибка при создании диаграмм: ' + chartError.message, () => loadUserDetails());
+                        }
+                    }
                 } else {
-                    alert('Error: ' + data.error);
+                    console.error('Ошибка ответа сервера:', data.error);
+                    
+                    // Создаем более дружественное сообщение об ошибке с возможностью повторить
+                    const errorMessage = data.error || 'Произошла ошибка загрузки данных';
+                    showErrorMessage(errorMessage, () => loadUserDetails());
                 }
             } catch (error) {
-                console.error('Error loading user details:', error);
-                alert('Error loading user data. Please try again.');
+                console.error('Ошибка загрузки пользовательских данных:', error);
+                
+                // Создаем более дружественное сообщение об ошибке с возможностью повторить
+                showErrorMessage('Ошибка: ' + error.message, () => loadUserDetails());
+            }
+        }
+        
+        // Функция для отображения сообщения об ошибке с возможностью повторить
+        function showErrorMessage(message, retryCallback, isLoading = false) {
+            // Получаем элементы статистики для скрытия
+            const statsContainer = document.querySelector('.stats-container');
+            const chartContainer = document.querySelector('.chart-container');
+            const tableContainer = document.querySelector('.users-table-container');
+            
+            // Скрываем обычный контент
+            if (statsContainer) statsContainer.style.display = 'none';
+            if (chartContainer) chartContainer.style.display = 'none';
+            if (tableContainer) tableContainer.style.display = 'none';
+            
+            // Создаем или получаем контейнер для сообщения об ошибке
+            let errorContainer = document.getElementById('error-container');
+            
+            if (!errorContainer) {
+                errorContainer = document.createElement('div');
+                errorContainer.id = 'error-container';
+                errorContainer.style.textAlign = 'center';
+                errorContainer.style.marginTop = '50px';
+                errorContainer.style.padding = '30px';
+                errorContainer.style.backgroundColor = 'white';
+                errorContainer.style.borderRadius = '10px';
+                errorContainer.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+                document.querySelector('.main-content').appendChild(errorContainer);
+            }
+            
+            // Заполняем контейнер ошибки
+            if (isLoading) {
+                // Показываем индикатор загрузки
+                errorContainer.innerHTML = `
+                    <i class="fas fa-spinner fa-spin" style="font-size: 48px; color: #5995fd; margin-bottom: 20px;"></i>
+                    <h3>Загрузка данных</h3>
+                    <p>${message}</p>
+                `;
+            } else {
+                // Показываем сообщение об ошибке
+                errorContainer.innerHTML = `
+                    <i class="fas fa-exclamation-circle" style="font-size: 48px; color: #dc3545; margin-bottom: 20px;"></i>
+                    <h3>Упс! Что-то пошло не так</h3>
+                    <p>${message}</p>
+                    ${retryCallback ? `
+                    <button id="retry-button" class="btn" style="margin-top: 20px;">
+                        <i class="fas fa-sync"></i> Повторить попытку
+                    </button>
+                    ` : ''}
+                `;
+                
+                // Добавляем обработчик для кнопки повтора
+                if (retryCallback) {
+                    const retryButton = document.getElementById('retry-button');
+                    if (retryButton) {
+                        retryButton.addEventListener('click', retryCallback);
+                    }
+                }
             }
         }
         
@@ -533,9 +915,121 @@
             alert('User list refreshed!');
         }
         
-        // Изменяем функцию loadStatistics чтобы использовать loadUserDetails
-        function loadStatistics() {
-            loadUserDetails();
+        // Создание круговой диаграммы пользователей с рассчитанными данными
+        function createUserChart(totalUsers, inactiveUsers, activeUsers, admins) {
+            const ctx = document.getElementById('userChart').getContext('2d');
+            
+            // Properly check and destroy existing chart
+            if (window.userChart instanceof Chart) {
+                window.userChart.destroy();
+            }
+            
+            window.userChart = new Chart(ctx, {
+                type: 'doughnut', // Используем doughnut вместо pie для лучшего вида
+                data: {
+                    labels: ['Active Users', 'Inactive Users', 'Admins'],
+                    datasets: [{
+                        data: [activeUsers, inactiveUsers, admins],
+                        backgroundColor: ['#28a745', '#f0f0f0', '#5995fd'],
+                        borderWidth: 1,
+                        borderColor: '#fff',
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%', // Делает отверстие внутри круга
+                    animation: {
+                        duration: 0 // Отключаем анимацию
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            display: true,
+                            labels: {
+                                padding: 20,
+                                boxWidth: 15,
+                                font: {
+                                    size: 14
+                                },
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.raw || 0;
+                                    const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((value / total) * 100);
+                                    return `${label}: ${value} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Создание круговой диаграммы активности с рассчитанными данными
+        function createActivityChart(messages, logins, activeUsers, newUsers) {
+            const ctx = document.getElementById('activityChart').getContext('2d');
+            
+            // Properly check and destroy existing chart
+            if (window.activityChart instanceof Chart) {
+                window.activityChart.destroy();
+            }
+            
+            // Используем реальные значения
+            window.activityChart = new Chart(ctx, {
+                type: 'doughnut', // Используем doughnut вместо pie для лучшего вида
+                data: {
+                    labels: ['Messages', 'Logins', 'Active Users', 'New Users'],
+                    datasets: [{
+                        data: [messages, logins, activeUsers, newUsers],
+                        backgroundColor: ['#5995fd', '#fd6359', '#28a745', '#ffc107'],
+                        borderWidth: 1,
+                        borderColor: '#fff',
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%', // Делает отверстие внутри круга
+                    animation: {
+                        duration: 0 // Отключаем анимацию
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            display: true,
+                            labels: {
+                                padding: 20,
+                                boxWidth: 15,
+                                font: {
+                                    size: 14
+                                },
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.raw || 0;
+                                    const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((value / total) * 100);
+                                    return `${label}: ${value} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
     </script>
 </body>

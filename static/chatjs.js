@@ -875,19 +875,30 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="message-text">${escapeHTML(message.text)}</span>
                             <div class="message-info">
                                 <span class="message-time">${message.time}</span>
-                                ${message.isSent ?
-                            `<span class="message-status ${message.status}">
-                                    <i class="fas fa-${message.status === 'read' ? 'check-double' : 'check'}" style="color: ${message.status === 'read' ? '#34b7f1' : '#8e8e8e'}"></i>
-                                </span>
+                                ${message.isSent ? `
+                                    <span class="message-status ${message.status}">
+                                        <i class="fas fa-${message.status === 'read' ? 'check-double' : 'check'}" style="color: ${message.status === 'read' ? '#34b7f1' : '#8e8e8e'}"></i>
+                                    </span>
+                                ` : ''}
+                            </div>
+                            ${message.isSent ? `
                                 <span class="message-actions">
                                     <i class="fas fa-ellipsis-v"></i>
                                     <div class="message-menu">
                                         <div class="menu-item">Редактировать</div>
                                         <div class="menu-item">Удалить</div>
                                         <div class="menu-item">Удалить у всех</div>
+                                        <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
                                     </div>
-                                </span>` : ''}
-                            </div>
+                                </span>
+                            ` : `
+                                <span class="message-actions">
+                                    <i class="fas fa-ellipsis-v"></i>
+                                    <div class="message-menu">
+                                        <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
+                                    </div>
+                                </span>
+                            `}
                         </div>
                     `;
                     chatMessages.appendChild(messageDiv);
@@ -955,6 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <div class="menu-item">Редактировать</div>
                                 <div class="menu-item">Удалить</div>
                                 <div class="menu-item">Удалить у всех</div>
+                                <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
                             </div>
                         </span>
                     </div>
@@ -1069,9 +1081,17 @@ document.addEventListener('DOMContentLoaded', () => {
                                             <div class="menu-item">Редактировать</div>
                                             <div class="menu-item">Удалить</div>
                                             <div class="menu-item">Удалить у всех</div>
+                                            <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
                                         </div>
                                     </span>
-                                ` : ''}
+                                ` : `
+                                    <span class="message-actions">
+                                        <i class="fas fa-ellipsis-v"></i>
+                                        <div class="message-menu">
+                                            <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
+                                        </div>
+                                    </span>
+                                `}
                             </div>
                         `;
 
@@ -1136,8 +1156,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const message = menuItem.closest('.message');
         // Проверяем, что сообщение отправлено текущим пользователем
-        if (!message.classList.contains('sent')) {
-            console.error('Нельзя редактировать чужие сообщения');
+        if (!message.classList.contains('sent') && !menuItem.textContent.includes('Переводить')) {
+            console.error('Нельзя редактировать или удалить чужие сообщения');
             return;
         }
 
@@ -1189,6 +1209,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <div class="menu-item">Редактировать</div>
                                 <div class="menu-item">Удалить</div>
                                 <div class="menu-item">Удалить у всех</div>
+                                <div class="menu-item"><i class="fas fa-language"></i> Переводить</div>
                             </div>
                         </span>
                     `;
@@ -1203,6 +1224,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
         } else if (menuItem.textContent.includes('Удалить')) {
+            // Проверяем, что сообщение отправлено текущим пользователем
+            if (!message.classList.contains('sent')) {
+                console.error('Нельзя удалить чужие сообщения');
+                return;
+            }
+            
             message.remove();
             messagesStorage[currentTarget].splice(messageIndex, 1);
         } else if (menuItem.textContent.includes('Удалить у всех')) {
@@ -1235,6 +1262,58 @@ document.addEventListener('DOMContentLoaded', () => {
                 .catch(error => {
                     console.error('Ошибка сети при удалении сообщения:', error);
                     alert('Ошибка сервера при удалении сообщения');
+                });
+        } else if (menuItem.textContent.includes('Переводить')) {
+            // Реализуем функционал перевода
+            const messageText = message.querySelector('.message-text').textContent;
+            const messageContent = message.querySelector('.message-content');
+            
+            // Проверяем, существует ли уже перевод
+            const existingTranslation = messageContent.querySelector('.translated-text');
+            if (existingTranslation) {
+                // Если перевод уже есть, просто удаляем его
+                existingTranslation.remove();
+                return;
+            }
+            
+            // Добавляем индикатор загрузки
+            const translationLoader = document.createElement('div');
+            translationLoader.className = 'translation-loading';
+            messageContent.appendChild(translationLoader);
+            
+            // Отправляем запрос на перевод
+            fetch('/api/translate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: messageText,
+                    source_lang: 'auto'  // Автоматическое определение языка
+                }),
+                credentials: 'include'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Удаляем индикатор загрузки
+                    translationLoader.remove();
+                    
+                    if (data.success) {
+                        // Создаем элемент с переводом
+                        const translatedElement = document.createElement('div');
+                        translatedElement.className = 'translated-text';
+                        translatedElement.setAttribute('data-lang', data.target_lang.toUpperCase());
+                        translatedElement.textContent = data.translated_text;
+                        
+                        // Добавляем перевод после текста сообщения
+                        messageContent.appendChild(translatedElement);
+                    } else {
+                        console.error('Ошибка при переводе:', data.error);
+                        alert('Не удалось перевести сообщение: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    translationLoader.remove();
+                    console.error('Ошибка сети при переводе:', error);
+                    alert('Ошибка сервера при переводе сообщения');
                 });
         }
     });

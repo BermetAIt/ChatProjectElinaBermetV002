@@ -8,6 +8,8 @@ import random
 import string
 from datetime import datetime, timedelta
 import logging
+import time
+from deep_translator import GoogleTranslator
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -43,6 +45,13 @@ def init_db():
         # Если колонка is_admin не существует, добавляем её
         logger.info("Добавляем колонку is_admin в таблицу users")
         c.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
+    
+    # Добавляем колонку last_activity, если она не существует
+    if 'last_activity' not in columns:
+        logger.info("Добавляем колонку last_activity в таблицу users")
+        c.execute('ALTER TABLE users ADD COLUMN last_activity TIMESTAMP')
+        # Устанавливаем значение по умолчанию для существующих пользователей
+        c.execute('UPDATE users SET last_activity = ?', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
     
     # Проверяем, существует ли админ
     c.execute('SELECT id, is_admin FROM users WHERE username = ?', ('admin',))
@@ -187,7 +196,7 @@ def chat():
 @app.route('/admin')
 def admin():
     if not session.get('is_admin'):
-        return jsonify({'error': 'Unauthorized'}), 401
+        return render_template('index.html', admin_error=True)
     return render_template('admin.html')
 
 @app.route('/api/register', methods=['POST'])
@@ -201,14 +210,34 @@ def register():
         return jsonify({'error': 'Все поля обязательны'}), 400
 
     hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
+    
+    # Добавляем дату создания аккаунта
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-                  (username, email, hashed_password))
+        
+        # Проверяем наличие колонки created_at
+        c.execute("PRAGMA table_info(users)")
+        columns = [info[1] for info in c.fetchall()]
+        
+        if 'created_at' in columns:
+            c.execute('INSERT INTO users (username, email, password, created_at, last_activity) VALUES (?, ?, ?, ?, ?)',
+                     (username, email, hashed_password, current_time, current_time))
+        else:
+            c.execute('INSERT INTO users (username, email, password, last_activity) VALUES (?, ?, ?, ?)',
+                     (username, email, hashed_password, current_time))
+            
         conn.commit()
+        
+        # Получаем ID нового пользователя
+        c.execute('SELECT id FROM users WHERE username = ?', (username,))
+        user_id = c.fetchone()[0]
+        
         conn.close()
+        
+        logger.info(f"Зарегистрирован новый пользователь: {username} (ID: {user_id})")
         return jsonify({'message': 'Пользователь успешно зарегистрирован'}), 201
     except sqlite3.IntegrityError:
         conn.close()
@@ -235,6 +264,10 @@ def login():
         if user and check_password_hash(user[1], password):
             session['username'] = username
             session['user_id'] = user[0]
+            
+            # Обновляем время активности пользователя
+            update_user_activity(user[0])
+            
             return jsonify({'message': 'Авторизация успешна'}), 200
         return jsonify({'error': 'Неверное имя пользователя или пароль'}), 401
     except Exception as e:
@@ -281,6 +314,10 @@ def admin_login():
             session['username'] = username
             session['user_id'] = user_id
             session['is_admin'] = True
+            
+            # Обновляем активность администратора
+            update_user_activity(user_id)
+            
             conn.close()
             return jsonify({'message': 'Авторизация админа успешна'}), 200
             
@@ -294,6 +331,10 @@ def admin_login():
             session['username'] = username
             session['user_id'] = user_id
             session['is_admin'] = True
+            
+            # Обновляем активность администратора
+            update_user_activity(user_id)
+            
             conn.close()
             return jsonify({'message': 'Авторизация админа успешна'}), 200
             
@@ -392,34 +433,87 @@ def get_users():
 @app.route('/api/users/details', methods=['GET'])
 def get_users_details():
     # Этот маршрут доступен только для администраторов
+    logger.info(f"Запрос данных пользователей от: {session.get('username', 'неизвестный пользователь')}, is_admin: {session.get('is_admin', False)}")
+    
     if not session.get('is_admin'):
         logger.warning("Неавторизованный доступ к /api/users/details")
-        return jsonify({'error': 'Необходимы права администратора'}), 401
-        
+        response = jsonify({'error': 'Необходимы права администратора'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 401
+    
     try:
+        # Обновляем активность администратора
+        if session.get('user_id'):
+            update_user_activity(session['user_id'])
+            
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT id, username, email, is_admin FROM users')
+        
+        # Проверяем наличие колонки created_at
+        c.execute("PRAGMA table_info(users)")
+        columns = [info[1] for info in c.fetchall()]
+        
+        # Обновляем запрос для получения времени последней активности и создания
+        if 'created_at' in columns:
+            c.execute('SELECT id, username, email, is_admin, last_activity, created_at FROM users')
+        else:
+            c.execute('SELECT id, username, email, is_admin, last_activity FROM users')
+        
         users_data = c.fetchall()
         
+        # Определяем, какие пользователи активны (были в сети за последние 24 часа)
+        active_threshold = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+        
         users = []
-        for user_id, username, email, is_admin in users_data:
-            users.append({
-                'id': user_id,
-                'username': username,
-                'email': email,
-                'is_admin': bool(is_admin)
-            })
+        for user_row in users_data:
+            user_dict = {
+                'id': user_row[0],
+                'username': user_row[1],
+                'email': user_row[2],
+                'is_admin': bool(user_row[3]),
+                'last_activity': user_row[4]
+            }
             
+            # Проверяем активность
+            is_active = False
+            if user_dict['last_activity'] and user_dict['last_activity'] > active_threshold:
+                is_active = True
+            user_dict['is_active'] = is_active
+            
+            # Добавляем дату создания, если она доступна
+            if 'created_at' in columns:
+                user_dict['created_at'] = user_row[5]
+                # Проверяем, является ли пользователь новым (создан сегодня)
+                is_new = False
+                if user_dict['created_at'] and user_dict['created_at'] >= today_start:
+                    is_new = True
+                user_dict['is_new'] = is_new
+            
+            users.append(user_dict)
+        
         conn.close()
-        return jsonify({'users': users}), 200
+        logger.info(f"Данные пользователей успешно отправлены ({len(users)} пользователей)")
+        
+        response = jsonify({'users': users})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 200
     except Exception as e:
         logger.error(f"Ошибка при получении подробных данных пользователей: {e}")
-        return jsonify({'error': 'Ошибка сервера'}), 500
+        response = jsonify({'error': f'Ошибка сервера: {str(e)}'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 500
 
 @app.route('/api/groups', methods=['GET'])
 def get_groups():
     try:
+        # Обновляем активность пользователя если авторизован
+        if 'user_id' in session:
+            update_user_activity(session['user_id'])
+            
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('SELECT id, name FROM groups')
@@ -535,6 +629,9 @@ def add_contact():
         return jsonify({'success': False, 'error': 'Нельзя добавить себя в контакты'}), 400
 
     try:
+        # Обновляем активность пользователя
+        update_user_activity(session['user_id'])
+        
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -578,6 +675,9 @@ def get_contacts():
         return jsonify({'success': False, 'error': 'Пользователь не авторизован'}), 401
 
     try:
+        # Обновляем активность пользователя
+        update_user_activity(session['user_id'])
+        
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('''SELECT u.username 
@@ -682,6 +782,9 @@ def send_message():
         return jsonify({'success': False, 'error': 'Некорректный идентификатор пользователя'}), 400
 
     try:
+        # Обновляем активность отправителя
+        update_user_activity(session['user_id'])
+        
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -772,6 +875,9 @@ def get_messages():
         return jsonify({'success': False, 'error': 'Недопустимый режим'}), 400
 
     try:
+        # Обновляем активность пользователя при получении сообщений
+        update_user_activity(session['user_id'])
+        
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -1211,6 +1317,208 @@ def delete_message_for_all():
             conn.close()
         logger.error(f"Ошибка при удалении сообщения: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/translate', methods=['POST'])
+def translate_text():
+    if 'username' not in session or 'user_id' not in session:
+        logger.warning("Неавторизованный доступ к /api/translate")
+        return jsonify({'success': False, 'error': 'Пользователь не авторизован'}), 401
+    
+    data = request.get_json()
+    text = data.get('text')
+    source_lang = data.get('source_lang')  # auto, ru, en
+    
+    if not text:
+        return jsonify({'success': False, 'error': 'Текст для перевода обязателен'}), 400
+    
+    try:
+        # Улучшенное определение языка текста, если не указан
+        if source_lang == 'auto' or not source_lang:
+            ru_chars = 0
+            en_chars = 0
+            for char in text.lower():
+                if 'а' <= char <= 'я' or char == 'ё':
+                    ru_chars += 1
+                elif 'a' <= char <= 'z':
+                    en_chars += 1
+            
+            source_lang = 'ru' if ru_chars > en_chars else 'en'
+            logger.info(f"Определен язык: {source_lang} (ru_chars: {ru_chars}, en_chars: {en_chars})")
+        
+        # Целевой язык
+        target_lang = 'en' if source_lang == 'ru' else 'ru'
+        
+        # Попытка использовать Google Translate API через deep-translator
+        try:
+            # Создаем экземпляр переводчика
+            translator = GoogleTranslator(source=source_lang, target=target_lang)
+            
+            # Используем Google Translate
+            translated_text = translator.translate(text)
+            
+            logger.info(f"Google Translate: {text} ({source_lang}) -> {translated_text} ({target_lang})")
+            return jsonify({
+                'success': True, 
+                'text': text,
+                'translated_text': translated_text,
+                'source_lang': source_lang,
+                'target_lang': target_lang
+            }), 200
+            
+        except Exception as e:
+            # В случае ошибки с Google Translate используем резервный метод
+            logger.warning(f"Ошибка Google Translate: {e}. Используем резервный метод.")
+            
+            # Простая транслитерация как резервный метод
+            if source_lang == 'ru':
+                # Русский -> Английский: просто указываем, что это перевод
+                translated_text = f"Translation of: {text}"
+            else:
+                # Английский -> Русский: просто указываем, что это перевод
+                translated_text = f"Перевод: {text}"
+            
+            logger.info(f"Резервный перевод: {text} ({source_lang}) -> {translated_text} ({target_lang})")
+            return jsonify({
+                'success': True, 
+                'text': text,
+                'translated_text': translated_text,
+                'source_lang': source_lang,
+                'target_lang': target_lang,
+                'fallback': True # Флаг, что использован резервный метод
+            }), 200
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переводе текста: {e}")
+        return jsonify({'success': False, 'error': f'Ошибка сервера: {str(e)}'}), 500
+
+@app.route('/api/messages/stats', methods=['GET'])
+def get_messages_stats():
+    """Endpoint для получения статистики сообщений для админ-панели"""
+    if not session.get('is_admin'):
+        logger.warning("Неавторизованный доступ к /api/messages/stats")
+        return jsonify({'error': 'Необходимы права администратора'}), 401
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Получаем общее количество сообщений (считаем уникальные)
+        c.execute('''
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT sender_id, receiver_id, text, time 
+                FROM messages
+            )
+        ''')
+        total_messages = c.fetchone()[0]
+        
+        # Получаем количество сообщений за последний день
+        yesterday = datetime.now() - timedelta(days=1)
+        yesterday_str = yesterday.strftime('%Y-%m-%d %H:%M:%S')
+        
+        c.execute('''
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT sender_id, receiver_id, text, time 
+                FROM messages
+                WHERE time > ?
+            )
+        ''', (yesterday_str,))
+        recent_messages = c.fetchone()[0]
+        
+        # Текущая дата и время для расчетов
+        now = datetime.now()
+        
+        # Получаем количество активных пользователей за последние 24 часа
+        active_since = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+        c.execute('''
+            SELECT COUNT(*) FROM users 
+            WHERE last_activity > ? AND is_admin = 0
+        ''', (active_since,))
+        active_users = c.fetchone()[0]
+        
+        # Получаем количество новых пользователей за сегодня
+        # Для этого нам нужно получить пользователей, созданных сегодня
+        # В качестве приближения мы используем id пользователей (предполагая, что id увеличивается последовательно)
+        
+        # Сначала получим минимальный ID для пользователей, зарегистрированных сегодня
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Проверим наличие колонки created_at в таблице пользователей
+        c.execute("PRAGMA table_info(users)")
+        columns = [info[1] for info in c.fetchall()]
+        
+        if 'created_at' not in columns:
+            # Если колонки нет, добавим её и установим текущее время для существующих пользователей
+            c.execute('ALTER TABLE users ADD COLUMN created_at TIMESTAMP')
+            c.execute('UPDATE users SET created_at = last_activity WHERE last_activity IS NOT NULL')
+            c.execute('UPDATE users SET created_at = ? WHERE created_at IS NULL', (now.strftime('%Y-%m-%d %H:%M:%S'),))
+            conn.commit()
+            logger.info("Добавлена колонка created_at в таблицу users")
+        
+        # Теперь подсчитаем новых пользователей, созданных сегодня
+        c.execute('''
+            SELECT COUNT(*) FROM users 
+            WHERE created_at >= ? AND is_admin = 0
+        ''', (today_start,))
+        new_users = c.fetchone()[0]
+        
+        # Общее количество пользователей
+        c.execute('SELECT COUNT(*) FROM users WHERE is_admin = 0')
+        total_regular_users = c.fetchone()[0]
+        
+        # Статистика по пользователям
+        c.execute('''
+            SELECT sender_id, COUNT(*) FROM (
+                SELECT DISTINCT sender_id, text, time 
+                FROM messages
+            ) GROUP BY sender_id ORDER BY COUNT(*) DESC LIMIT 5
+        ''')
+        top_senders_data = c.fetchall()
+        
+        top_senders = []
+        for sender_id, count in top_senders_data:
+            c.execute('SELECT username FROM users WHERE id = ?', (sender_id,))
+            username = c.fetchone()
+            if username:
+                top_senders.append({
+                    'username': username[0],
+                    'count': count
+                })
+        
+        conn.close()
+        
+        logger.info(f"Статистика: всего сообщений {total_messages}, за последний день {recent_messages}, активных пользователей: {active_users}, новых пользователей: {new_users}")
+        
+        response = jsonify({
+            'total_messages': total_messages,
+            'recent_messages': recent_messages,
+            'active_users': active_users,
+            'new_users': new_users,
+            'total_regular_users': total_regular_users,
+            'top_senders': top_senders
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 200
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении статистики сообщений: {e}")
+        response = jsonify({'error': f'Ошибка сервера: {str(e)}'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 500
+
+# Функция для обновления времени последней активности пользователя
+def update_user_activity(user_id):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('UPDATE users SET last_activity = ? WHERE id = ?', 
+                 (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id))
+        conn.commit()
+        conn.close()
+        logger.debug(f"Обновлено время активности для пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении времени активности: {e}")
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

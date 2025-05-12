@@ -150,8 +150,31 @@ document.addEventListener('DOMContentLoaded', function() {
         container.classList.remove('sign-up-mode');
     });
 
+    // Проверяем параметр admin_error
+    const urlParams = new URLSearchParams(window.location.search);
+    const adminErrorInUrl = urlParams.get('admin_error');
+    const adminErrorInBody = document.body.getAttribute('data-admin-error') === 'true';
+    const adminError = adminErrorInUrl || adminErrorInBody;
+    
+    if (adminError) {
+        // Если есть ошибка доступа админа, показываем форму входа админа
+        showAdminLogin();
+        
+        // Добавляем сообщение об ошибке
+        const messageContainer = document.querySelector(".admin-sign-in-form .message-container");
+        if (messageContainer) {
+            messageContainer.textContent = "Для доступа к админ-панели необходима авторизация";
+            messageContainer.style.color = "red";
+        }
+    }
+
     function showAdminLogin() {
         container.classList.add('admin-mode');
+        container.classList.remove('sign-up-mode');
+        const adminFormContainer = document.querySelector('.admin-form-container');
+        if (adminFormContainer) {
+            adminFormContainer.style.display = 'flex';
+        }
     }
 
     // Add event listener to admin button
@@ -174,20 +197,36 @@ document.addEventListener('DOMContentLoaded', function() {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password }),
+                    credentials: 'include' // Важно для сохранения сессии
                 });
 
                 const data = await response.json();
+                const messageContainer = adminForm.querySelector('.message-container');
+                
                 if (response.ok) {
-                    window.location.href = '/admin';
-                } else {
-                    const messageContainer = adminForm.querySelector('.message-container');
                     if (messageContainer) {
-                        messageContainer.textContent = data.error || 'Login failed';
+                        messageContainer.textContent = "Успешная авторизация! Переход в панель администратора...";
+                        messageContainer.style.color = "green";
+                    }
+                    
+                    // Задержка перед перенаправлением для отображения сообщения
+                    setTimeout(() => {
+                        window.location.href = '/admin';
+                    }, 1000);
+                } else {
+                    if (messageContainer) {
+                        messageContainer.textContent = data.error || 'Ошибка авторизации';
+                        messageContainer.style.color = "red";
                     }
                 }
             } catch (error) {
                 console.error('Error:', error);
+                const messageContainer = adminForm.querySelector('.message-container');
+                if (messageContainer) {
+                    messageContainer.textContent = "Ошибка сервера";
+                    messageContainer.style.color = "red";
+                }
             }
         });
     }

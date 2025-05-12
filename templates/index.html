@@ -10,7 +10,7 @@
 
 </head>
 
-<body>
+<body {% if admin_error %}data-admin-error="true"{% endif %}>
   <button class="admin-btn" onclick="showAdminLogin()">Admin</button>
   <div class="container">
     <div class="form-container">
